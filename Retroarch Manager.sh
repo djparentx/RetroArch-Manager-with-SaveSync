@@ -55,7 +55,7 @@ RA64_CFG="$RA64/retroarch.cfg"
 LOG_FILE="/home/ark/.config/savesync.log"
 
 
-T_BACKTITLE="Retroarch Manager v1.0"
+T_BACKTITLE="Retroarch Manager v1.1"
 T_STARTING="Starting $T_BACKTITLE please wait..."
 T_MAIN_TITLE="Main Menu"
 T_SAVE_LOCATION="Save Location"
