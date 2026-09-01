@@ -8,10 +8,10 @@ SaveSync is a built-in feature of **RetroArch Manager** that automatically synch
 
 It is designed to keep your saves synchronized without requiring you to manually copy them. Once configured, SaveSync can synchronize saves:
 
-* Automatically when dArkOS starts
+* Automatically when the console starts
 * Automatically when you exit a game
 * Manually whenever you choose
-* Between multiple dArkOS devices using the same PC share
+* Between multiple R36S devices using the same PC share
 
 SaveSync uses SMB/CIFS to connect to the Windows share and `rsync` to synchronize the files in both directions.
 
@@ -81,7 +81,7 @@ C:\SaveSync
 
 You can use any location you prefer.
 
-Do **not** create a separate folder for each R36S. A single shared SaveSync folder can be used by multiple dArkOS devices.
+Do **not** create a separate folder for each R36S. A single shared SaveSync folder can be used by multiple R36S devices.
 
 ---
 
