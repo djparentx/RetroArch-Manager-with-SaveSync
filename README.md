@@ -1,6 +1,6 @@
 [<img width="200" height="67" alt="ChatGPT Image Aug 12, 2026, 02_04_12 PM" img align="right"  src="https://github.com/user-attachments/assets/7eb7b583-5d57-4884-ae90-ad7127d733c4" alt="Right aligned" />](https://ko-fi.com/O8Z424G15Y)
 # RetroArch Manager with SaveSync
-A script to manage gamesave locations and automatically synchronize them over a local samba network.
+A script to manage gamesave locations and automatically synchronize them over local SMB network sharing. SaveSync does not require an account or subscription, everything is managed locally on the host device.
 
 # SaveSync
 
