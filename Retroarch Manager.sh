@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # =======================================
-# Retroarch Manager v1.1
+# Retroarch Manager v1.2
 # by djparent
 # =======================================
 
@@ -52,31 +52,50 @@ SERVICE_FILE="/etc/systemd/system/savesync.service"
 RA64="/home/ark/.config/retroarch"
 RA32="/home/ark/.config/retroarch32"
 RA64_CFG="$RA64/retroarch.cfg"
+RA32_CFG="$RA32/retroarch.cfg"
 LOG_FILE="/home/ark/.config/savesync.log"
 
 
 T_BACKTITLE="Retroarch Manager v1.1"
 T_STARTING="Starting $T_BACKTITLE please wait..."
 T_MAIN_TITLE="Main Menu"
+T_LOG_TITLE="Log Menu"
 T_SAVE_LOCATION="Save Location"
 T_LOCATION="Current location:"
 T_STATUS="Choose new location for game saves:"
 T_WAIT="Please wait..."
 T_EXIT="Exit"
-T_SAVE_LOC="content folders"
-T_FOLDER_LOC="saves folder"
+T_MIGRATE="Migrate from ArkOS"
+T_CONTENT_FOLDER="content folders"
+T_SAVE_FOLDER="saves folder"
 T_SAVE="Retroarch Folder (/retroarch/saves)"
 T_FOLDER="Game Content Folders (/roms/gb)"
 T_COPY="Copying files..."
 T_SSYNC="SaveSync"
 T_CRED="Enter Credentials"
 T_MANUAL="Synchronize Now"
-T_LOG="View Log"
+T_VIEW_LOG="View Log"
+T_CLEAR_LOG="Clear Log"
+T_LOG_CLEARED="Log cleared."
+T_NO_LOG="No log file found."
 T_IP="NetBIOS or IP"
 T_NAME="Username"
 T_PASS="Password"
 T_PATH="Network Path"
 T_SELECT="Please make a selection:"
+T_MIGRATION_COMPLETE="Save migration complete"
+T_NO_MIGRATE="Nothing to migrate."
+T_UNINSTALL="Uninstall SaveSync"
+T_INSTALL="Install SaveSync"
+T_SURE="Are you sure?"
+T_SS_INSTALL="SaveSync installed."
+T_SS_UNINSTALL="SaveSync uninstalled."
+T_NO_INSTALL="Unable to install required CIFS support."
+T_SUCCESS="Success!"
+T_FAILED="Failed."
+T_NO_DETAILS="No error details were recorded."
+T_PROTOCOL="Protocol Menu"
+
 
 # =======================================================
 # Start gamepad input
@@ -315,7 +334,7 @@ Install_SaveSync() {
 			dialog \
 				--backtitle "$T_BACKTITLE" \
 				--title "$T_SSYNC" \
-				--msgbox "\nUnable to install required CIFS support." \
+				--msgbox "\n$T_NO_INSTALL" \
 				8 45 \
 				2>&1 > "$CURR_TTY"
 			return
@@ -334,7 +353,7 @@ NETWORKPATH=
 		chmod 600 "$CRD_FILE"
 	fi
 
-	# --- Sync script (placeholder) ---
+	# --- Sync script  ---
 	if [[ ! -f "$FLAG_FILE" ]]; then
 		cat >  "$SYNC_SCRIPT" <<'EOF'
 #!/usr/bin/env bash
@@ -361,8 +380,50 @@ RA32_SAVES="/home/ark/.config/retroarch32/saves"
 MOUNT_POINT="/mnt/savesync"
 PC_CFG_NAME="savesync.cfg"
 
+MEDNAFEN_SYSTEMS="lynx wonderswancolor pcengine pcenginecd nes gb snes gbc gba mastersystem megadrive gamegear ngp ngpc"
+
+STANDALONE_PATHS=(
+    "/roms/n64|*.sra *.eep *.fla"
+    "/roms/nds/backup|*.dsv"
+    "/roms/saturn|*.srm"
+    "/roms/bios/dc|*.bin"
+    "/roms/dreamcast|*.bin"
+    "/roms/psp/ppsspp/PSP/SAVEDATA|"
+    "/roms/psp/ppsspp/PSP/PPSSPP_STATE|*.ppst"
+    "/roms/pico-8/carts|"
+)
+
 log() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') - $*" >> "$LOG_FILE"
+}
+
+sync_standalone() {
+    local src="$1"
+    local filter="$2"
+
+    local rel="${src#/roms2/}"
+    rel="${rel#/roms/}"
+    local dst="$MOUNT_POINT/$rel"
+
+    if [ ! -d "$src" ] && [ ! -d "$dst" ]; then
+        return 0
+    fi
+
+    mkdir -p "$src" "$dst"
+
+    if [ -n "$filter" ]; then
+        local include_args=()
+        for pat in $filter; do
+            include_args+=(--include="$pat")
+        done
+        log "Syncing standalone: $src <-> $dst (filter: $filter)"
+        rsync -au --no-owner --no-group "${include_args[@]}" --exclude='*' "$src/" "$dst/" >> "$LOG_FILE" 2>&1
+        rsync -au --no-owner --no-group "${include_args[@]}" --exclude='*' "$dst/" "$src/" >> "$LOG_FILE" 2>&1
+    else
+        log "Syncing standalone: $src <-> $dst"
+        rsync -au --no-owner --no-group "$src/" "$dst/" >> "$LOG_FILE" 2>&1
+        rsync -au --no-owner --no-group "$dst/" "$src/" >> "$LOG_FILE" 2>&1
+    fi
 }
 
 # --- Network check ---
@@ -491,6 +552,11 @@ while IFS='|' read -r SYSTEM LOCATION RA64_ENABLED RA32_ENABLED; do
 	rsync -au --no-owner --no-group "$SRC_DIR/" "$DST_DIR/" >> "$LOG_FILE" 2>&1
 	rsync -au --no-owner --no-group "$DST_DIR/" "$SRC_DIR/" >> "$LOG_FILE" 2>&1
 
+    # Mednafen save sync (.mcr, same dir as ROMs, flat mirror)
+    if [ -n "$LOCATION" ] && [[ " $MEDNAFEN_SYSTEMS " == *" $SYSTEM "* ]]; then
+        sync_standalone "$LOCATION/$SYSTEM" "*.mcr"
+    fi
+
 done < <(awk '
     /<system>/ { name=""; path=""; ra64=0; ra32=0; in_emulators=0 }
     /<name>/ && name=="" {
@@ -512,6 +578,13 @@ done < <(awk '
         }
     }
 ' "$ES_SYSTEMS")
+
+# --- Sync standalone emulator saves (flat mirror) ---
+for entry in "${STANDALONE_PATHS[@]}"; do
+    SA_SRC="${entry%%|*}"
+    SA_FILTER="${entry#*|}"
+    sync_standalone "$SA_SRC" "$SA_FILTER"
+done
 
 # --- Unmount ---
 umount "$MOUNT_POINT"
@@ -537,6 +610,7 @@ EOF
 Description=SaveSync Boot Sync Service
 Wants=NetworkManager-wait-online.service
 After=NetworkManager-wait-online.service
+ExecStartPre=/bin/sleep 5
 
 [Service]
 Type=oneshot
@@ -552,7 +626,7 @@ WantedBy=multi-user.target
 
 	touch "$FLAG_FILE"
 
-	dialog --backtitle "$T_BACKTITLE" --msgbox "\nSaveSync installed." 6 40 2>&1 > "$CURR_TTY"
+	dialog --backtitle "$T_BACKTITLE" --msgbox "\n$T_SS_INSTALL" 6 40 2>&1 > "$CURR_TTY"
 }
 
 # =======================================================
@@ -578,7 +652,7 @@ Uninstall_SaveSync() {
 	# --- Flag ---
 	rm -f "$FLAG_FILE"
 
-	dialog --backtitle "$T_BACKTITLE" --msgbox "\nSaveSync uninstalled." 6 40 2>&1 > "$CURR_TTY"
+	dialog --backtitle "$T_BACKTITLE" --msgbox "\n$T_SS_UNINSTALL" 6 40 2>&1 > "$CURR_TTY"
 }
 
 # =======================================================
@@ -699,6 +773,159 @@ NetworkPath() {
 }
 
 # =======================================================
+# Manual Sync
+# =======================================================
+Manual_Sync() {
+    local LOG_START=0
+    local ERROR_MSG=""
+	local RESULT
+	
+	dialog --backtitle "$T_BACKTITLE" --infobox "\n    $T_WAIT" 5 40 2>&1 > "$CURR_TTY"
+
+    if [[ -f "$LOG_FILE" ]]; then
+        LOG_START=$(wc -c < "$LOG_FILE")
+    fi
+
+    if "$SYNC_SCRIPT" --bg; then
+        RESULT="SUCCESS"
+    else
+        RESULT="FAILED"
+    fi
+
+    if [[ -f "$LOG_FILE" ]]; then
+        ERROR_MSG=$(tail -c +"$((LOG_START + 1))" "$LOG_FILE" |
+            grep 'ERROR:' |
+            tail -n 1)
+    fi
+	
+    if [[ "$RESULT" == "SUCCESS" ]]; then
+        dialog \
+            --backtitle "$T_BACKTITLE" \
+            --title "$T_SSYNC" \
+            --msgbox "\n    $T_SUCCESS" \
+            7 40 \
+            2>&1 > "$CURR_TTY"
+    else
+		ERROR_MSG=$(printf '%s\n' "$ERROR_MSG" | fold -s -w 34)
+        if [[ -n "$ERROR_MSG" ]]; then
+            dialog \
+                --backtitle "$T_BACKTITLE" \
+                --title "$T_SSYNC" \
+                --msgbox "\n$T_FAILED\n\n$ERROR_MSG" \
+                10 40 \
+                2>&1 > "$CURR_TTY"
+        else
+            dialog \
+                --backtitle "$T_BACKTITLE" \
+                --title "$T_SSYNC" \
+                --msgbox "\n$T_FAILED\n\n$T_NO_DETAILS" \
+                10 40 \
+                2>&1 > "$CURR_TTY"
+        fi
+    fi
+}
+
+# =======================================================
+# Clear Log
+# =======================================================
+Clear_Log() {
+    if [[ ! -f "$LOG_FILE" ]]; then
+        dialog \
+            --backtitle "$T_BACKTITLE" \
+            --title "$T_SSYNC" \
+            --msgbox "\n$T_NO_LOG" \
+            7 40 \
+            2>&1 > "$CURR_TTY"
+        return
+    fi
+
+    : > "$LOG_FILE"
+
+    dialog \
+        --backtitle "$T_BACKTITLE" \
+        --title "$T_SSYNC" \
+        --msgbox "\n$T_LOG_CLEARED" \
+        7 40 \
+        2>&1 > "$CURR_TTY"
+}
+
+# =======================================================
+# View Log
+# =======================================================
+View_Log() {
+    if [[ ! -f "$LOG_FILE" ]]; then
+        dialog \
+            --backtitle "$T_BACKTITLE" \
+            --title "$T_SSYNC" \
+            --msgbox "\n$T_NO_LOG" \
+            7 40 \
+            2>&1 > "$CURR_TTY"
+        return
+    fi
+
+    local VIEW_LOG="/tmp/savesync_view.$$"
+
+    fold -s -w 36 "$LOG_FILE" > "$VIEW_LOG"
+
+    dialog \
+        --backtitle "$T_BACKTITLE" \
+        --title "$T_SSYNC" \
+        --textbox "$VIEW_LOG" \
+        16 40 \
+        2>&1 > "$CURR_TTY"
+
+    rm -f "$VIEW_LOG"
+}
+
+# =======================================================
+# Migrate Saves
+# =======================================================
+Migrate_Saves() {
+    local checks=(
+        'sort_savefiles_by_content_enable = "false"'
+        'sort_savestates_by_content_enable = "false"'
+        'sort_screenshots_by_content_enable = "false"'
+        'savefiles_in_content_dir = "true"'
+        'savestates_in_content_dir = "true"'
+        'screenshots_in_content_dir = "true"'
+    )
+
+    for check in "${checks[@]}"; do
+        grep -qF "$check" "$RA64_CFG" || { dialog --msgbox "$T_NO_MIGRATE" 6 30; return 1; }
+    done
+
+    dialog --yesno "$T_SURE" 6 30 || return 0
+
+    while IFS= read -r -d '' block; do
+        local name path subdir
+        name=$(grep -oP '(?<=<name>).*?(?=</name>)' <<< "$block" | head -1)
+        path=$(grep -oP '(?<=<path>).*?(?=</path>)' <<< "$block" | head -1)
+        path="${path/#\~/$HOME}"
+        [ -z "$name" ] && continue
+        [ -d "$path" ] || continue
+
+        subdir="$path/$name"
+        mkdir -p "$subdir"
+
+        find "$path" -maxdepth 1 -type f \( \
+            -name "*.srm" -o -name "*.state" -o -name "*.state[0-9]*" \
+            -o -name "*.state.auto" -o -name "*.png" -o -name "*.rtc" \
+            -o -name "*.bsv" \) -print0 | \
+        while IFS= read -r -d '' f; do
+            mv -n "$f" "$subdir/"
+        done
+    done < <(awk 'BEGIN{RS="<system>";ORS=""} NR>1{n=index($0,"</system>"); print substr($0,1,n+9) "\x00"}' "$ES_SYSTEMS")
+
+    sed -i \
+        -e 's/sort_savefiles_by_content_enable = "false"/sort_savefiles_by_content_enable = "true"/' \
+        -e 's/sort_savestates_by_content_enable = "false"/sort_savestates_by_content_enable = "true"/' \
+        -e 's/sort_screenshots_by_content_enable = "false"/sort_screenshots_by_content_enable = "true"/' \
+        "$RA64_CFG" "$RA32_CFG"
+
+    dialog --msgbox "$T_MIGRATION_COMPLETE" 6 30
+}
+
+# =======================================================
 # Credentials Menu dialog
 # =======================================================
 Credentials_Menu() {
@@ -746,84 +973,71 @@ Credentials_Menu() {
 }
 
 # =======================================================
-# Manual Sync
+# Protocol Menu dialog
 # =======================================================
-Manual_Sync() {
-    local LOG_START=0
-    local ERROR_MSG=""
-	local RESULT
-	
-	dialog --backtitle "$T_BACKTITLE" --infobox "\n    $T_WAIT" 5 40 2>&1 > "$CURR_TTY"
+Protocol_Menu() {
+	while true; do
+		# --- keep gptokeyb alive ---
+		if [[ -z $(pgrep -f gptokeyb) ]]; then
+			Start_GPTKeyb
+		fi
 
-    if [[ -f "$LOG_FILE" ]]; then
-        LOG_START=$(wc -c < "$LOG_FILE")
-    fi
+		local CHOICE
+		CHOICE=$(dialog \
+			--clear \
+			--colors \
+			--no-collapse \
+			--cancel-label "$T_EXIT" \
+			--backtitle "$T_BACKTITLE" \
+			--title "$T_PROTOCOL" \
+			--menu "" \
+			14 45 6 \
+			"1" "SMB" \
+			"2" "WebDAV" \
+			"3" "NFS" \
+            2>&1 > "$CURR_TTY")
+			
+			[[ $? -ne 0 ]] && return
 
-    if "$SYNC_SCRIPT" --bg; then
-        RESULT="SUCCESS"
-    else
-        RESULT="FAILED"
-    fi
-
-    if [[ -f "$LOG_FILE" ]]; then
-        ERROR_MSG=$(tail -c +"$((LOG_START + 1))" "$LOG_FILE" |
-            grep 'ERROR:' |
-            tail -n 1)
-    fi
-	
-    if [[ "$RESULT" == "SUCCESS" ]]; then
-        dialog \
-            --backtitle "$T_BACKTITLE" \
-            --title "$T_SSYNC" \
-            --msgbox "\n    Success!" \
-            7 40 \
-            2>&1 > "$CURR_TTY"
-    else
-		ERROR_MSG=$(printf '%s\n' "$ERROR_MSG" | fold -s -w 34)
-        if [[ -n "$ERROR_MSG" ]]; then
-            dialog \
-                --backtitle "$T_BACKTITLE" \
-                --title "$T_SSYNC" \
-                --msgbox "\nFailed\n\n$ERROR_MSG" \
-                10 40 \
-                2>&1 > "$CURR_TTY"
-        else
-            dialog \
-                --backtitle "$T_BACKTITLE" \
-                --title "$T_SSYNC" \
-                --msgbox "\n    Failed\n\nNo error details were recorded." \
-                10 40 \
-                2>&1 > "$CURR_TTY"
-        fi
-    fi
+			case "$CHOICE" in
+				1) SMB ;;
+				2) WebDAV ;;
+				3) NFS ;;
+			esac
+	done
 }
 
 # =======================================================
-# View Log
+# Log Menu dialog
 # =======================================================
-View_Log() {
-    if [[ ! -f "$LOG_FILE" ]]; then
-        dialog \
-            --backtitle "$T_BACKTITLE" \
-            --title "$T_SSYNC" \
-            --msgbox "\nNo log file found." \
-            7 40 \
-            2>&1 > "$CURR_TTY"
-        return
-    fi
+Log_Menu() {
+	while true; do
+		# --- keep gptokeyb alive ---
+		if [[ -z $(pgrep -f gptokeyb) ]]; then
+			Start_GPTKeyb
+		fi
 
-    local VIEW_LOG="/tmp/savesync_view.$$"
+		local CHOICE
+		CHOICE=$(dialog \
+			--clear \
+			--colors \
+			--no-collapse \
+			--cancel-label "$T_EXIT" \
+			--backtitle "$T_BACKTITLE" \
+			--title "$T_LOG_TITLE" \
+			--menu "" \
+			14 45 6 \
+			"1" "$T_VIEW_LOG" \
+			"2" "$T_CLEAR_LOG" \
+            2>&1 > "$CURR_TTY")
+			
+			[[ $? -ne 0 ]] && return
 
-    fold -s -w 36 "$LOG_FILE" > "$VIEW_LOG"
-
-    dialog \
-        --backtitle "$T_BACKTITLE" \
-        --title "$T_SSYNC" \
-        --textbox "$VIEW_LOG" \
-        16 40 \
-        2>&1 > "$CURR_TTY"
-
-    rm -f "$VIEW_LOG"
+			case "$CHOICE" in
+				1) View_Log ;;
+				2) Clear_Log ;;
+			esac
+	done
 }
 
 # =======================================================
@@ -838,9 +1052,9 @@ SaveSync_Menu() {
 		
 		local installed
 		if [[ -f "$FLAG_FILE" ]]; then
-			installed="Uninstall SaveSync"
+			installed="$T_UNINSTALL"
 		else
-			installed="Install SaveSync"
+			installed="$T_INSTALL"
 		fi
 		
 		local CHOICE
@@ -856,7 +1070,8 @@ SaveSync_Menu() {
 			"1" "$installed" \
 			"2" "$T_CRED" \
 			"3" "$T_MANUAL" \
-			"4" "$T_LOG" \
+			"4" "$T_PROTOCOL" \
+			"5" "$T_LOG_TITLE" \
             2>&1 > "$CURR_TTY")
 			
 			[[ $? -ne 0 ]] && return
@@ -869,7 +1084,8 @@ SaveSync_Menu() {
 					fi ;;
 				2) Credentials_Menu ;;
 				3) Manual_Sync ;;
-				4) View_Log ;;
+				4) Protocol_Menu ;;
+				5) Log_Menu ;;
 			esac
 	done
 }
@@ -888,13 +1104,13 @@ Location_Menu() {
 		local location
 		location=$(grep '^savefiles_in_content_dir' "$RA64_CFG" | grep -o 'true\|false')
 		if [[ "$location" == "true" ]]; then
-			location="$T_SAVE_LOC"
+			location="$T_CONTENT_FOLDER"
 			save="$T_SAVE"
-			state="content folders"
+			state="1"
 		else
-			location="$T_FOLDER_LOC"
+			location="$T_SAVE_FOLDER"
 			save="$T_FOLDER"
-			state="saves folder"
+			state="0"
 		fi
 		
 		local CHOICE
@@ -908,16 +1124,19 @@ Location_Menu() {
 			--menu "$T_LOCATION \Z2$location\Zn\n$T_STATUS" \
 			14 45 6 \
 			"1" "$save" \
+			"2" "$T_MIGRATE" \
             2>&1 > "$CURR_TTY")
 			
 			[[ $? -ne 0 ]] && return
 
 			case "$CHOICE" in
-				1) if [[ "$state" == "content folders" ]]; then
+				1) dialog --yesno "$T_SURE" 6 30 || return 0
+					if [[ "$state" == "1" ]]; then
 						Saves_Folder
 					else
 						Content_Folders
 					fi ;;
+				2) Migrate_Saves ;;
 			esac
 	done
 }
